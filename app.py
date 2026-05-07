@@ -198,24 +198,23 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Forca tema claro por padrao. O usuario pode alterar manualmente pelo
-# menu ">" do proprio Streamlit se quiser.
+# Apenas dois estilos proprios: o card de info do checkpoint e o
+# glyph grande da predicao. Todo o resto usa o tema nativo do
+# Streamlit, configurado em .streamlit/config.toml (tema claro).
 st.markdown(
     """
     <style>
-    :root { color-scheme: light; }
-    body, .stApp { background-color: #FFFFFF !important; color: #1A1A1A; }
     .info-card {
-        background: #F5F5F2;
-        border: 1px solid #E0E0DD;
+        background: var(--secondary-background-color, #F5F5F2);
+        border: 1px solid rgba(0, 0, 0, 0.08);
         border-radius: 10px;
         padding: 14px 16px;
         font-size: 13px;
-        line-height: 1.7;
+        line-height: 1.8;
     }
     .info-card code {
-        background: #FFFFFF;
-        border: 1px solid #E0E0DD;
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(0, 0, 0, 0.08);
         border-radius: 4px;
         padding: 1px 6px;
         font-size: 12px;
@@ -313,7 +312,7 @@ def exibir_predicao(img28, rotulo_real=None):
 
     if rotulo_real is None:
         titulo = "Predicao"
-        cor = "#1A1A1A"
+        cor = None
     elif classe_top == rotulo_real:
         titulo = "Acerto"
         cor = "#1F7A3D"
@@ -327,13 +326,15 @@ def exibir_predicao(img28, rotulo_real=None):
         st.image(img28, caption="entrada 28x28", width=120, clamp=True)
 
     with col_glyph:
+        cor_titulo = cor if cor else "inherit"
+        cor_glyph = cor if cor else "inherit"
         st.markdown(
             f"<div style='text-align:center;'>"
             f"<div style='font-size:10px; letter-spacing:2px;"
-            f" text-transform:uppercase; color:{cor}; font-weight:600;'>"
+            f" text-transform:uppercase; color:{cor_titulo}; font-weight:600;'>"
             f"{titulo}</div>"
-            f"<div class='glyph' style='color:{cor};'>{classe_top}</div>"
-            f"<div style='font-size:13px; color:#555;'>"
+            f"<div class='glyph' style='color:{cor_glyph};'>{classe_top}</div>"
+            f"<div style='font-size:13px; opacity:0.7;'>"
             f"{conf_top * 100:.2f}% confianca</div>"
             f"</div>",
             unsafe_allow_html=True,
@@ -509,7 +510,7 @@ with aba_emnist:
                             f"<div style='text-align:center;'>"
                             f"<span style='font-weight:700; color:{cor}; font-size:18px;'>"
                             f"{simbolo} {r['pred']}</span>"
-                            f"<div style='font-size:11px; color:#666;'>"
+                            f"<div style='font-size:11px; opacity:0.7;'>"
                             f"real <b>{r['real']}</b> | {r['conf'] * 100:.0f}%</div>"
                             f"</div>",
                             unsafe_allow_html=True,

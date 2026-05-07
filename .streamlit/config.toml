@@ -1,0 +1,14 @@
+# Forca o tema claro por padrao em todos os componentes do Streamlit.
+# Evita o problema de mistura entre tema escuro do sistema e tema claro
+# de alguns elementos (cards, sidebar, metricas, etc).
+
+[theme]
+base = "light"
+primaryColor = "#1F7A3D"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F2"
+textColor = "#1A1A1A"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
