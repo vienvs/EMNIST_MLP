@@ -11,19 +11,23 @@ Classificacao dos caracteres manuscritos do **EMNIST Balanced** (47 classes, dig
 - Duas arquiteturas MLP (com e sem BatchNorm) treinadas e comparadas.
 - Pipeline completo: transforms, split treino/val/teste, TensorBoard, checkpoint, matriz de confusao e exemplos de predicao.
 - Extensoes simples alem do basico: test-time augmentation (TTA) e ensemble das duas redes por media de probabilidades.
-- Aplicacao Streamlit (item 3.6 opcional do enunciado) que recebe o desenho do usuario ou um upload de imagem e retorna a classe prevista + top 3.
+- Aplicacao Streamlit (item 3.6 opcional do enunciado) com duas abas: desenho livre no canvas e amostras reais do conjunto de teste EMNIST com acerto/erro visivel.
 
 ## Estrutura
 
 ```
-EMNIST_MLP_v2/
+EMNIST_MLP/
 |-- emnist_mlp.ipynb       notebook principal (treino + avaliacao)
 |-- app.py                 aplicacao Streamlit
 |-- passo_a_passo.md       explicacao de origem de cada decisao tecnica
 |-- requirements.txt       dependencias do projeto
-|-- checkpoints/           .pth do melhor modelo (gerado pelo notebook)
+|-- scripts/
+|   `-- gerar_amostra_teste.py   gera data/test_sample.npz para a app
+|-- checkpoints/           .pth dos melhores modelos (gerado pelo notebook)
 |-- runs/                  logs do TensorBoard (gerado pelo notebook)
-`-- data/                  dataset EMNIST baixado automaticamente
+`-- data/
+    |-- EMNIST/            dataset original baixado pelo notebook (ignorado)
+    `-- test_sample.npz    recorte estratificado usado pela app (versionado)
 ```
 
 ## Como rodar
@@ -61,17 +65,24 @@ Abrir `http://localhost:6006` no navegador.
 
 ### 4. Rodar a aplicacao Streamlit
 
-Com pelo menos um checkpoint salvo em `checkpoints/`, rodar:
+A app usa um pacote pequeno de amostras reais do EMNIST ja versionado em `data/test_sample.npz` (~360 KB). Se esse arquivo nao existir, gere com:
+
+```
+python scripts/gerar_amostra_teste.py
+```
+
+Com os checkpoints e o `test_sample.npz` disponiveis, rode:
 
 ```
 streamlit run app.py
 ```
 
-A app abre em `http://localhost:8501`. Voce pode:
+A app abre em `http://localhost:8501` e oferece duas abas:
 
-- Desenhar um digito ou letra no canvas.
-- Fazer upload de uma imagem (PNG ou JPG) com fundo claro e traco escuro.
-- Ativar TTA e ensemble na sidebar para ver o impacto.
+- **Desenhar**: o usuario traca um digito ou letra no canvas de 280x280 e ve a classe prevista, a confianca e o top 3.
+- **EMNIST**: sorteia amostras reais do conjunto de teste, mostra um grid com acerto/erro (verde/laranja), e permite analisar uma amostra em detalhe.
+
+Na sidebar voce pode selecionar o modelo ativo (A ou B), ver as informacoes do checkpoint (melhor epoca, val_acc, val_loss) e ativar TTA ou ensemble.
 
 ## Arquitetura dos modelos
 

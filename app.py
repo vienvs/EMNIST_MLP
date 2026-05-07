@@ -1,21 +1,18 @@
 """
-Aplicacao Streamlit para o trabalho EMNIST MLP.
-Item 3.6 do enunciado (opcional, ponto extra).
+Aplicacao Streamlit para o trabalho EMNIST MLP (item 3.6 do enunciado).
 
-Fluxo:
-  1. Usuario desenha um caractere num canvas de 280x280 pixels (ou faz
-     upload de uma imagem).
-  2. O desenho e convertido para o formato 28x28 que a rede espera:
-     escala de cinza, invertido (fundo preto, traco branco), recortado
-     pela bounding box e centralizado num quadrado.
-  3. A imagem normalizada (mesma media e desvio usados no treino) e
-     passada para o modelo.
-  4. Mostramos a classe prevista e a probabilidade Softmax das top 3
-     classes.
+Duas abas:
 
-As tecnicas opcionais de inferencia (TTA e ensemble) podem ser
-ativadas na sidebar, para reproduzir o comportamento das secoes 7.2,
-7.3 e 7.4 do notebook.
+- "Desenhar": o usuario traca um caractere no canvas e ve a predicao.
+- "EMNIST":   sorteia amostras reais do conjunto de teste, mostra o
+              rotulo real lado a lado com a predicao do modelo.
+
+A sidebar permite selecionar o checkpoint ativo, ativar TTA e ensemble,
+e mostra as informacoes do checkpoint carregado (melhor epoca, val_acc,
+val_loss).
+
+Os modelos sao carregados via load_state_dict a partir dos arquivos
+.pth produzidos pelo notebook emnist_mlp.ipynb.
 """
 import os
 
@@ -29,7 +26,7 @@ from streamlit_drawable_canvas import st_canvas
 
 
 # ---------------------------------------------------------------------------
-# Arquiteturas (copiadas do notebook emnist_mlp.ipynb, secao 3)
+# Arquiteturas (copiadas identicas do notebook emnist_mlp.ipynb)
 # ---------------------------------------------------------------------------
 
 class MLP_A(nn.Module):
@@ -61,16 +58,14 @@ class MLP_B(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Constantes do EMNIST Balanced
+# Constantes
 # ---------------------------------------------------------------------------
 
 # Media e desvio padrao calculados no proprio notebook (celula 2.2).
-# Sao valores fixos do EMNIST Balanced, nao mudam entre execucoes.
 MEDIA = 0.1751
 DESVIO = 0.3331
 
-# As 47 classes do EMNIST Balanced. A ordem e a mesma que o
-# torchvision.datasets.EMNIST(split="balanced").classes retorna.
+# Lista canonica das 47 classes do EMNIST Balanced.
 CLASSES = list("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabdefghnqrt")
 
 ARQUIVOS_CKPT = {
@@ -78,55 +73,71 @@ ARQUIVOS_CKPT = {
     "MLP_B": "checkpoints/MLP_B_melhor.pth",
 }
 
+ARQ_AMOSTRA = os.path.join("data", "test_sample.npz")
+
 
 # ---------------------------------------------------------------------------
-# Carregamento do checkpoint
+# Carregamento do checkpoint e das amostras de teste
 # ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner=False)
 def carregar_modelo(nome):
-    """Carrega um checkpoint da pasta checkpoints/ e devolve o modelo
-    em modo eval. Retorna None se o arquivo nao existir."""
+    """Carrega um checkpoint. Devolve (modelo, info_dict) ou (None, None)."""
     caminho = ARQUIVOS_CKPT[nome]
     if not os.path.exists(caminho):
-        return None
+        return None, None
     ckpt = torch.load(caminho, map_location="cpu", weights_only=False)
     classe = MLP_B if nome == "MLP_B" else MLP_A
     modelo = classe(ckpt.get("n_classes", 47))
     modelo.load_state_dict(ckpt["modelo_state"])
     modelo.eval()
-    return modelo
+    info = {
+        "nome": nome,
+        "epoca": ckpt.get("epoca", "-"),
+        "val_acc": ckpt.get("val_acc", None),
+        "val_loss": ckpt.get("val_loss", None),
+    }
+    return modelo, info
+
+
+@st.cache_resource(show_spinner=False)
+def carregar_amostras_bundled():
+    """Le o arquivo data/test_sample.npz com amostras reais do EMNIST
+    (ja com orientacao corrigida). Retorna None se o arquivo nao existir."""
+    if not os.path.exists(ARQ_AMOSTRA):
+        return None
+    pacote = np.load(ARQ_AMOSTRA, allow_pickle=True)
+    return {
+        "images": pacote["images"],
+        "labels": pacote["labels"],
+        "classes": [str(c) for c in pacote["classes"].tolist()],
+    }
 
 
 # ---------------------------------------------------------------------------
-# Pipeline de pre-processamento da entrada do usuario
+# Pre-processamento (canvas do usuario) e normalizacao
 # ---------------------------------------------------------------------------
 
 def tensor_normalizado(img28_uint8):
-    """Recebe um array 28x28 uint8 (fundo preto, traco branco) e
-    devolve um tensor [1, 1, 28, 28] normalizado com a mesma media e
-    desvio usados no treino."""
+    """Recebe imagem 28x28 uint8 (fundo preto, traco branco) e devolve
+    tensor [1, 1, 28, 28] normalizado com a media e desvio do treino."""
     t = torch.from_numpy(img28_uint8.astype(np.float32) / 255.0).unsqueeze(0)
     t = (t - MEDIA) / DESVIO
     return t.unsqueeze(0)
 
 
 def canvas_para_28x28(image_data):
-    """Converte a saida RGBA do canvas (fundo branco, traco escuro)
-    para uma imagem 28x28 no formato EMNIST (fundo preto, traco
-    branco), centralizada."""
+    """Converte a saida RGBA do canvas para 28x28 no formato EMNIST."""
     if image_data is None:
         return None
     rgba = np.array(image_data, dtype=np.uint8)
     if rgba[:, :, 3].max() == 0:
         return None
 
-    # converte RGB -> cinza e inverte (fundo preto, traco branco)
     cinza = ImageOps.grayscale(Image.fromarray(rgba[:, :, :3]))
     invertida = ImageOps.invert(cinza)
     arr = np.array(invertida)
 
-    # bounding box do traco
     mascara = arr > 30
     if not mascara.any():
         return None
@@ -135,7 +146,6 @@ def canvas_para_28x28(image_data):
     recorte = Image.fromarray(arr[linhas[0]:linhas[-1] + 1,
                                   colunas[0]:colunas[-1] + 1])
 
-    # redimensiona preservando proporcao para caber em 20x20
     h, w = recorte.height, recorte.width
     if h > w:
         nh, nw = 20, max(1, int(round(w * 20 / h)))
@@ -143,24 +153,13 @@ def canvas_para_28x28(image_data):
         nh, nw = max(1, int(round(h * 20 / w))), 20
     recorte = recorte.resize((nw, nh), Image.Resampling.LANCZOS)
 
-    # cola no centro de um quadrado 28x28 preto
     canvas28 = Image.new("L", (28, 28), color=0)
     canvas28.paste(recorte, ((28 - nw) // 2, (28 - nh) // 2))
     return np.array(canvas28, dtype=np.uint8)
 
 
-def upload_para_28x28(arquivo):
-    """Converte um arquivo de imagem enviado pelo usuario para o mesmo
-    formato 28x28 esperado pelo modelo. Assume que a imagem tem fundo
-    claro e traco escuro (como o canvas)."""
-    if arquivo is None:
-        return None
-    img = Image.open(arquivo).convert("RGBA")
-    return canvas_para_28x28(np.array(img))
-
-
 # ---------------------------------------------------------------------------
-# Inferencia (com e sem TTA / ensemble)
+# Inferencia (com TTA / ensemble opcionais)
 # ---------------------------------------------------------------------------
 
 def inferir(modelo, tensor):
@@ -169,8 +168,7 @@ def inferir(modelo, tensor):
 
 
 def inferir_tta(modelo, img28):
-    """Media de Softmax entre a imagem original e 4 versoes deslocadas
-    em 1 pixel. Mesmo TTA da secao 7.2 do notebook."""
+    """5 versoes (original + 4 deslocadas em 1 pixel). Media das Softmaxes."""
     versoes = [img28]
     for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
         versoes.append(np.roll(img28, shift=(dy, dx), axis=(0, 1)))
@@ -179,8 +177,7 @@ def inferir_tta(modelo, img28):
 
 
 def predizer(modelos, img28, usar_tta):
-    """Aplica TTA (opcional) e media entre modelos (se houver mais de
-    um). Retorna o vetor de probabilidades final."""
+    """Media de Softmax entre todos os modelos. Aplica TTA se ativo."""
     probs = []
     for m in modelos:
         if usar_tta:
@@ -191,19 +188,58 @@ def predizer(modelos, img28, usar_tta):
 
 
 # ---------------------------------------------------------------------------
-# Interface Streamlit
+# Tema claro por padrao (apenas um CSS enxuto)
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
     page_title="EMNIST MLP",
     page_icon="A",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("Classificador EMNIST - MLP")
-st.caption("Trabalho P1 de Aprendizagem de Maquina | PUC-SP")
+# Forca tema claro por padrao. O usuario pode alterar manualmente pelo
+# menu ">" do proprio Streamlit se quiser.
+st.markdown(
+    """
+    <style>
+    :root { color-scheme: light; }
+    body, .stApp { background-color: #FFFFFF !important; color: #1A1A1A; }
+    .info-card {
+        background: #F5F5F2;
+        border: 1px solid #E0E0DD;
+        border-radius: 10px;
+        padding: 14px 16px;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+    .info-card code {
+        background: #FFFFFF;
+        border: 1px solid #E0E0DD;
+        border-radius: 4px;
+        padding: 1px 6px;
+        font-size: 12px;
+    }
+    .glyph {
+        font-size: 96px;
+        font-weight: 700;
+        text-align: center;
+        margin: 0;
+        line-height: 1;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-# --- Sidebar ---
+
+st.title("Classificador EMNIST - MLP")
+st.caption("Trabalho P1 de Aprendizagem de Maquina | PUC-SP | Vinicius de Lucena")
+
+
+# ---------------------------------------------------------------------------
+# Sidebar: configuracao e informacoes do .pth
+# ---------------------------------------------------------------------------
 
 with st.sidebar:
     st.header("Configuracao")
@@ -212,73 +248,105 @@ with st.sidebar:
     if not disponiveis:
         st.error(
             "Nenhum checkpoint encontrado em `checkpoints/`. "
-            "Rode o notebook `emnist_mlp.ipynb` para treinar os modelos "
-            "antes de abrir a app."
+            "Rode o notebook `emnist_mlp.ipynb` para treinar os modelos."
         )
         st.stop()
 
     modelo_nome = st.selectbox("Modelo principal", disponiveis)
 
+    modelo_principal, info_principal = carregar_modelo(modelo_nome)
+
+    # Card com as informacoes do checkpoint carregado
+    if info_principal is not None:
+        val_acc = info_principal["val_acc"]
+        val_loss = info_principal["val_loss"]
+        linhas = [f"<b>{info_principal['nome']}</b>"]
+        linhas.append(f"melhor epoca &nbsp; <code>{info_principal['epoca']}</code>")
+        if val_acc is not None:
+            linhas.append(f"val_acc &nbsp; <code>{val_acc * 100:.2f}%</code>")
+        if val_loss is not None:
+            linhas.append(f"val_loss &nbsp; <code>{val_loss:.4f}</code>")
+        st.markdown(
+            "<div class='info-card'>" + "<br>".join(linhas) + "</div>",
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
     usar_tta = st.checkbox(
         "Test-time augmentation (TTA)",
         value=False,
-        help="Passa 5 versoes da imagem pela rede (original + 4 deslocadas) "
-             "e tira a media das Softmaxes. Mesma tecnica da secao 7.2 do "
-             "notebook.",
+        help="Passa 5 versoes da imagem (original + 4 deslocadas em 1 pixel) "
+             "e tira a media das Softmaxes. Mesma tecnica da secao 7.2 do notebook.",
     )
     usar_ensemble = st.checkbox(
         "Ensemble A + B",
         value=False,
         disabled=len(disponiveis) < 2,
-        help="Se os dois modelos estao disponiveis, faz a media das "
-             "Softmaxes das duas arquiteturas. Mesma tecnica da secao 7.3 "
+        help="Media das Softmaxes de MLP_A e MLP_B. Mesma tecnica da secao 7.3 "
              "do notebook.",
     )
 
+    if usar_ensemble:
+        modelos_usados = [carregar_modelo(nome)[0] for nome in disponiveis]
+    else:
+        modelos_usados = [modelo_principal]
+
     st.divider()
     st.caption(
-        "Para ver detalhes das tecnicas, abra `passo_a_passo.md`. "
-        "Os modelos sao carregados do disco (item 3.4 do enunciado)."
+        "As amostras reais do EMNIST sao carregadas de "
+        f"`{ARQ_AMOSTRA}`. Para gerar esse arquivo, rode "
+        "`python scripts/gerar_amostra_teste.py`."
     )
 
 
-# --- Carrega modelos ---
-modelo_principal = carregar_modelo(modelo_nome)
-if usar_ensemble:
-    modelos_usados = [carregar_modelo(nome) for nome in disponiveis]
-else:
-    modelos_usados = [modelo_principal]
+# ---------------------------------------------------------------------------
+# Funcao comum: exibe predicao (imagem + glyph + top-3)
+# ---------------------------------------------------------------------------
 
-
-# --- Duas formas de entrada: canvas e upload ---
-
-aba_desenho, aba_upload = st.tabs(["Desenhar", "Upload de imagem"])
-
-
-def mostrar_predicao(img28):
-    """Roda inferencia e mostra classe prevista + top-3."""
-    if img28 is None:
-        st.info("Nenhuma imagem para classificar.")
-        return
-
+def exibir_predicao(img28, rotulo_real=None):
+    """Mostra imagem, classe prevista em destaque e top-3."""
     probs = predizer(modelos_usados, img28, usar_tta)
     top_idx = int(np.argmax(probs))
     classe_top = CLASSES[top_idx]
     conf_top = float(probs[top_idx])
 
-    col_glyph, col_bars = st.columns([1, 2])
+    if rotulo_real is None:
+        titulo = "Predicao"
+        cor = "#1A1A1A"
+    elif classe_top == rotulo_real:
+        titulo = "Acerto"
+        cor = "#1F7A3D"
+    else:
+        titulo = "Erro"
+        cor = "#C2410C"
+
+    col_img, col_glyph, col_bars = st.columns([1, 1.1, 2])
+
+    with col_img:
+        st.image(img28, caption="entrada 28x28", width=120, clamp=True)
 
     with col_glyph:
         st.markdown(
-            f"<h1 style='text-align:center; font-size:96px; margin:0;'>"
-            f"{classe_top}</h1>",
+            f"<div style='text-align:center;'>"
+            f"<div style='font-size:10px; letter-spacing:2px;"
+            f" text-transform:uppercase; color:{cor}; font-weight:600;'>"
+            f"{titulo}</div>"
+            f"<div class='glyph' style='color:{cor};'>{classe_top}</div>"
+            f"<div style='font-size:13px; color:#555;'>"
+            f"{conf_top * 100:.2f}% confianca</div>"
+            f"</div>",
             unsafe_allow_html=True,
         )
-        st.caption(f"Confianca: **{conf_top * 100:.2f}%**")
-        st.image(img28, caption="imagem 28x28", width=120, clamp=True)
+        if rotulo_real is not None and classe_top != rotulo_real:
+            st.markdown(
+                f"<div style='text-align:center; font-size:12px; margin-top:6px;'>"
+                f"real: <b style='color:#C2410C'>{rotulo_real}</b></div>",
+                unsafe_allow_html=True,
+            )
 
     with col_bars:
-        st.subheader("Top 3")
+        st.markdown("**Top 3**")
         ord_idx = np.argsort(probs)[::-1][:3]
         for i in ord_idx:
             st.progress(
@@ -286,9 +354,27 @@ def mostrar_predicao(img28):
                 text=f"**{CLASSES[i]}** - {probs[i] * 100:.2f}%",
             )
 
+    with st.expander("Distribuicao completa (47 classes)"):
+        ord_full = np.argsort(probs)[::-1]
+        tabela = {
+            "rank": list(range(1, len(ord_full) + 1)),
+            "classe": [CLASSES[i] for i in ord_full],
+            "probabilidade": [f"{probs[i] * 100:.3f}%" for i in ord_full],
+        }
+        st.dataframe(tabela, use_container_width=True, height=320, hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Abas: Desenhar e EMNIST
+# ---------------------------------------------------------------------------
+
+aba_desenho, aba_emnist = st.tabs(["Desenhar", "EMNIST"])
+
+
+# --- Aba Desenhar ---
 
 with aba_desenho:
-    col_canvas, col_resultado = st.columns([1, 1])
+    col_canvas, col_resultado = st.columns([1, 1.5])
 
     with col_canvas:
         espessura = st.slider("Espessura do traco", 8, 40, 20, step=2)
@@ -309,22 +395,135 @@ with aba_desenho:
     with col_resultado:
         if canvas_result.image_data is not None:
             img28 = canvas_para_28x28(canvas_result.image_data)
-            mostrar_predicao(img28)
+            if img28 is not None:
+                exibir_predicao(img28)
+            else:
+                st.info("Desenhe um caractere para ver a predicao.")
         else:
             st.info("Desenhe um caractere para ver a predicao.")
 
 
-with aba_upload:
-    arq = st.file_uploader(
-        "Envie uma imagem (PNG, JPG)",
-        type=["png", "jpg", "jpeg", "bmp"],
-        help="Idealmente uma imagem com fundo claro e traco escuro, "
-             "parecido com o que o canvas produz.",
-    )
-    if arq is not None:
-        img28 = upload_para_28x28(arq)
-        if img28 is not None:
-            mostrar_predicao(img28)
+# --- Aba EMNIST: amostras reais do conjunto de teste ---
+
+with aba_emnist:
+    pacote = carregar_amostras_bundled()
+    if pacote is None:
+        st.warning(
+            f"Arquivo `{ARQ_AMOSTRA}` nao encontrado. "
+            f"Rode `python scripts/gerar_amostra_teste.py` para gera-lo."
+        )
+    else:
+        imagens_ds = pacote["images"]
+        labels_ds = pacote["labels"]
+        classes_ds = pacote["classes"]
+
+        st.caption(
+            f"{len(labels_ds):,} amostras reais do conjunto de teste do "
+            f"EMNIST (bundled em `{ARQ_AMOSTRA}`)."
+        )
+
+        col_f, col_n, col_b = st.columns([2, 2, 1])
+        with col_f:
+            filtro = st.selectbox(
+                "Filtrar por classe",
+                options=["(todas)"] + classes_ds,
+                index=0,
+            )
+        with col_n:
+            qtd = st.slider("Quantas amostras", 4, 24, 12, step=4)
+        with col_b:
+            st.markdown("&nbsp;", unsafe_allow_html=True)
+            sortear = st.button("Sortear", use_container_width=True)
+
+        chave_filtro = f"{filtro}_{qtd}"
+        if (
+            "emnist_idx" not in st.session_state
+            or sortear
+            or chave_filtro != st.session_state.get("emnist_chave")
+        ):
+            st.session_state["emnist_chave"] = chave_filtro
+            if filtro == "(todas)":
+                pool = np.arange(len(labels_ds))
+            else:
+                alvo = classes_ds.index(filtro)
+                pool = np.where(labels_ds == alvo)[0]
+
+            if len(pool) == 0:
+                st.session_state["emnist_idx"] = []
+            else:
+                rng = np.random.default_rng()
+                n = min(qtd, len(pool))
+                st.session_state["emnist_idx"] = rng.choice(
+                    pool, size=n, replace=False
+                ).tolist()
+
+        indices = st.session_state.get("emnist_idx", [])
+        if not indices:
+            st.info("Nenhuma amostra para esse filtro.")
         else:
-            st.warning("Nao foi possivel processar a imagem. Verifique se "
-                       "ela contem um traco visivel sobre fundo claro.")
+            resultados = []
+            for idx in indices:
+                img = imagens_ds[idx]
+                real = classes_ds[labels_ds[idx]]
+                probs = predizer(modelos_usados, img, usar_tta)
+                pred_idx = int(np.argmax(probs))
+                pred = CLASSES[pred_idx]
+                conf = float(probs[pred_idx])
+                resultados.append({
+                    "img": img,
+                    "real": real,
+                    "pred": pred,
+                    "conf": conf,
+                    "correto": pred == real,
+                    "probs": probs,
+                })
+
+            total = len(resultados)
+            acertos = sum(1 for r in resultados if r["correto"])
+            conf_media = sum(r["conf"] for r in resultados) / total if total else 0
+            conf_acertos = (
+                sum(r["conf"] for r in resultados if r["correto"])
+                / max(acertos, 1)
+            )
+
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Acertos", f"{acertos}/{total}")
+            col_m2.metric("Taxa", f"{acertos / total * 100:.0f}%")
+            col_m3.metric("Conf. media", f"{conf_media * 100:.1f}%")
+            col_m4.metric("Conf. nos acertos", f"{conf_acertos * 100:.1f}%")
+
+            st.markdown(" ")
+
+            # Grid de miniaturas
+            por_linha = 6
+            opcoes_detalhe = []
+            for inicio in range(0, len(resultados), por_linha):
+                linha = resultados[inicio:inicio + por_linha]
+                cols = st.columns(por_linha)
+                for j, r in enumerate(linha):
+                    with cols[j]:
+                        simbolo = "OK" if r["correto"] else "X"
+                        cor = "#1F7A3D" if r["correto"] else "#C2410C"
+                        st.image(r["img"], use_container_width=True, clamp=True)
+                        st.markdown(
+                            f"<div style='text-align:center;'>"
+                            f"<span style='font-weight:700; color:{cor}; font-size:18px;'>"
+                            f"{simbolo} {r['pred']}</span>"
+                            f"<div style='font-size:11px; color:#666;'>"
+                            f"real <b>{r['real']}</b> | {r['conf'] * 100:.0f}%</div>"
+                            f"</div>",
+                            unsafe_allow_html=True,
+                        )
+                        opcoes_detalhe.append(r)
+
+            st.divider()
+
+            # Drill-down em uma amostra
+            rotulos_dd = [
+                f"#{i + 1} | pred={r['pred']} | real={r['real']}"
+                for i, r in enumerate(opcoes_detalhe)
+            ]
+            sel = st.selectbox("Analisar uma amostra em detalhe", options=rotulos_dd)
+            if sel:
+                r = opcoes_detalhe[rotulos_dd.index(sel)]
+                exibir_predicao(r["img"], rotulo_real=r["real"])
