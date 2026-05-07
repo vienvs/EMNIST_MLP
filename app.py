@@ -1,17 +1,13 @@
 """
-Aplicacao Streamlit para o trabalho EMNIST MLP (item 3.6 do enunciado).
+Aplicacao Streamlit para o trabalho EMNIST MLP
 
 Duas abas:
 
-- "Desenhar": o usuario traca um caractere no canvas e ve a predicao.
+- "Desenhar": o usuario traca um caractere no canvas e ve a predição.
 - "EMNIST":   sorteia amostras reais do conjunto de teste, mostra o
-              rotulo real lado a lado com a predicao do modelo.
+              rotulo real lado a lado com a predição do modelo.
 
-A sidebar permite selecionar o checkpoint ativo, ativar TTA e ensemble,
-e mostra as informacoes do checkpoint carregado (melhor epoca, val_acc,
-val_loss).
-
-Os modelos sao carregados via load_state_dict a partir dos arquivos
+Os modelos são carregados via load_state_dict a partir dos arquivos
 .pth produzidos pelo notebook emnist_mlp.ipynb.
 """
 import os
@@ -24,10 +20,6 @@ import torch.nn.functional as F
 from PIL import Image, ImageOps
 from streamlit_drawable_canvas import st_canvas
 
-
-# ---------------------------------------------------------------------------
-# Arquiteturas (copiadas identicas do notebook emnist_mlp.ipynb)
-# ---------------------------------------------------------------------------
 
 class MLP_A(nn.Module):
     def __init__(self, n_classes=47):
@@ -57,10 +49,6 @@ class MLP_B(nn.Module):
         return self.rede(x)
 
 
-# ---------------------------------------------------------------------------
-# Constantes
-# ---------------------------------------------------------------------------
-
 # Media e desvio padrao calculados no proprio notebook (celula 2.2).
 MEDIA = 0.1751
 DESVIO = 0.3331
@@ -75,10 +63,6 @@ ARQUIVOS_CKPT = {
 
 ARQ_AMOSTRA = os.path.join("data", "test_sample.npz")
 
-
-# ---------------------------------------------------------------------------
-# Carregamento do checkpoint e das amostras de teste
-# ---------------------------------------------------------------------------
 
 @st.cache_resource(show_spinner=False)
 def carregar_modelo(nome):
@@ -113,10 +97,6 @@ def carregar_amostras_bundled():
         "classes": [str(c) for c in pacote["classes"].tolist()],
     }
 
-
-# ---------------------------------------------------------------------------
-# Pre-processamento (canvas do usuario) e normalizacao
-# ---------------------------------------------------------------------------
 
 def tensor_normalizado(img28_uint8):
     """Recebe imagem 28x28 uint8 (fundo preto, traco branco) e devolve
@@ -158,10 +138,6 @@ def canvas_para_28x28(image_data):
     return np.array(canvas28, dtype=np.uint8)
 
 
-# ---------------------------------------------------------------------------
-# Inferencia (com TTA / ensemble opcionais)
-# ---------------------------------------------------------------------------
-
 def inferir(modelo, tensor):
     with torch.no_grad():
         return F.softmax(modelo(tensor), dim=1).squeeze(0).numpy()
@@ -186,11 +162,6 @@ def predizer(modelos, img28, usar_tta):
             probs.append(inferir(m, tensor_normalizado(img28)))
     return np.mean(probs, axis=0)
 
-
-# ---------------------------------------------------------------------------
-# Tema claro por padrao (apenas um CSS enxuto)
-# ---------------------------------------------------------------------------
-
 st.set_page_config(
     page_title="EMNIST MLP",
     page_icon="A",
@@ -201,6 +172,7 @@ st.set_page_config(
 # Apenas dois estilos proprios: o card de info do checkpoint e o
 # glyph grande da predicao. Todo o resto usa o tema nativo do
 # Streamlit, configurado em .streamlit/config.toml (tema claro).
+
 st.markdown(
     """
     <style>
@@ -234,11 +206,6 @@ st.markdown(
 
 st.title("Classificador EMNIST - MLP")
 st.caption("Trabalho P1 de Aprendizagem de Maquina | PUC-SP | Vinicius de Lucena")
-
-
-# ---------------------------------------------------------------------------
-# Sidebar: configuracao e informacoes do .pth
-# ---------------------------------------------------------------------------
 
 with st.sidebar:
     st.header("Configuracao")
@@ -298,10 +265,6 @@ with st.sidebar:
         "`python scripts/gerar_amostra_teste.py`."
     )
 
-
-# ---------------------------------------------------------------------------
-# Funcao comum: exibe predicao (imagem + glyph + top-3)
-# ---------------------------------------------------------------------------
 
 def exibir_predicao(img28, rotulo_real=None):
     """Mostra imagem, classe prevista em destaque e top-3."""
@@ -364,10 +327,6 @@ def exibir_predicao(img28, rotulo_real=None):
         }
         st.dataframe(tabela, use_container_width=True, height=320, hide_index=True)
 
-
-# ---------------------------------------------------------------------------
-# Abas: Desenhar e EMNIST
-# ---------------------------------------------------------------------------
 
 aba_desenho, aba_emnist = st.tabs(["Desenhar", "EMNIST"])
 
