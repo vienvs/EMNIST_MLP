@@ -204,11 +204,11 @@ st.markdown(
 )
 
 
-st.title("Classificador EMNIST - MLP")
-st.caption("Trabalho P1 de Aprendizagem de Maquina | PUC-SP | Vinicius de Lucena")
+st.title("Classificador EMNIST MLP")
+st.caption("Trabalho P1 Vinicius de Lucena RA 00376040")
 
 with st.sidebar:
-    st.header("Configuracao")
+    st.header("Configuração")
 
     disponiveis = [nome for nome, c in ARQUIVOS_CKPT.items() if os.path.exists(c)]
     if not disponiveis:
@@ -260,9 +260,8 @@ with st.sidebar:
 
     st.divider()
     st.caption(
-        "As amostras reais do EMNIST sao carregadas de "
-        f"`{ARQ_AMOSTRA}`. Para gerar esse arquivo, rode "
-        "`python scripts/gerar_amostra_teste.py`."
+        "As amostras reais do EMNIST são carregadas de "
+        f"`{ARQ_AMOSTRA}`."
     )
 
 
@@ -318,7 +317,7 @@ def exibir_predicao(img28, rotulo_real=None):
                 text=f"**{CLASSES[i]}** - {probs[i] * 100:.2f}%",
             )
 
-    with st.expander("Distribuicao completa (47 classes)"):
+    with st.expander("Distribuição completa (47 classes)"):
         ord_full = np.argsort(probs)[::-1]
         tabela = {
             "rank": list(range(1, len(ord_full) + 1)),
